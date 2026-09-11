@@ -1,0 +1,27 @@
+{
+  "name": "Money — Finanz-Tracker",
+  "short_name": "Money",
+  "description": "Dein smarter Finanz-Tracker für Einnahmen, Ausgaben und Sparziele",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f9fafb",
+  "theme_color": "#4f46e5",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["finance", "productivity"],
+  "lang": "de",
+  "dir": "ltr"
+}

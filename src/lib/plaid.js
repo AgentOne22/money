@@ -1,8 +1,10 @@
 /**
- * Plaid API Integration für automatische Kontozugriffe
- * Unterstützt: Link Token, Account Sync, Transaction Import
- * Fallback: Mock-Modus für MVP (keine echten API-Calls ohne Credentials)
+ * Plaid API Integration — Live + Mock
+ * Uses the official `plaid` npm package when credentials are available.
+ * Falls back to realistic mock mode for development/MVP.
  */
+
+import { PlaidApi, PlaidEnvironments, Products, CountryCode } from 'plaid';
 
 export const PLAID_ENV = {
   sandbox: 'sandbox',
@@ -10,11 +12,20 @@ export const PLAID_ENV = {
   production: 'production'
 };
 
-export const PLAID_PRODUCTS = ['transactions', 'auth', 'identity'];
+export const PLAID_PRODUCTS = [Products.Transactions, Products.Auth, Products.Identity];
 
-export const PLAID_COUNTRY_CODES = ['DE', 'US', 'GB', 'FR', 'IT', 'ES', 'NL', 'BE'];
+export const PLAID_COUNTRY_CODES = [
+  CountryCode.De,
+  CountryCode.Us,
+  CountryCode.Gb,
+  CountryCode.Fr,
+  CountryCode.It,
+  CountryCode.Es,
+  CountryCode.Nl,
+  CountryCode.Be
+];
 
-// Deutsche Banken mit Plaid-Support (vereinfacht)
+// Deutsche Banken mit Plaid-Support
 export const PLAID_BANK_INFO = {
   sparkasse: { name: 'Sparkasse', country: 'DE' },
   postbank: { name: 'Postbank', country: 'DE' },
@@ -36,8 +47,7 @@ export const PLAID_ERRORS = {
 };
 
 /**
- * Plaid Client - Mock-Modus für MVP
- * In Produktion: @plaid/node Bibliothek verwenden
+ * Plaid Client — supports both live API and mock mode
  */
 export class PlaidClient {
   constructor(config = {}) {
@@ -47,11 +57,22 @@ export class PlaidClient {
     this.products = config.products || PLAID_PRODUCTS;
     this.countryCodes = config.countryCodes || PLAID_COUNTRY_CODES;
     this.isMock = !this.clientId || !this.secret;
+
+    if (!this.isMock) {
+      this.client = new PlaidApi({
+        baseOptions: {
+          headers: {
+            'PLAID-CLIENT-ID': this.clientId,
+            'PLAID-SECRET': this.secret
+          }
+        },
+        basePath: PlaidEnvironments[this.env]
+      });
+    }
   }
 
   /**
    * Erstellt einen Link Token für die Bank-Auswahl
-   * Mock: Gibt einen Test-Token zurück
    */
   async createLinkToken(userId, redirectUri = null) {
     if (this.isMock) {
@@ -63,17 +84,32 @@ export class PlaidClient {
       };
     }
 
-    // Echter Plaid API-Call würde hier erfolgen
-    // const response = await fetch(`https://${this.env}.plaid.com/link/token/create`, {...})
-    return {
-      success: false,
-      error: 'Plaid API-Call nicht implementiert (MVP Mock-Modus aktiv)'
-    };
+    try {
+      const response = await this.client.linkTokenCreate({
+        user: { client_user_id: userId },
+        client_name: 'Money',
+        products: this.products,
+        country_codes: this.countryCodes,
+        language: 'de',
+        redirect_uri: redirectUri || undefined
+      });
+
+      return {
+        success: true,
+        link_token: response.data.link_token,
+        expiration: response.data.expiration,
+        request_id: response.data.request_id
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.error_message || PLAID_ERRORS.CONNECTION_ERROR
+      };
+    }
   }
 
   /**
    * Tauscht Public Token gegen Access Token
-   * Mock: Simuliert den Austausch
    */
   async exchangePublicToken(publicToken) {
     if (this.isMock) {
@@ -85,10 +121,23 @@ export class PlaidClient {
       };
     }
 
-    return {
-      success: false,
-      error: 'Plaid API-Call nicht implementiert (MVP Mock-Modus aktiv)'
-    };
+    try {
+      const response = await this.client.itemPublicTokenExchange({
+        public_token: publicToken
+      });
+
+      return {
+        success: true,
+        access_token: response.data.access_token,
+        item_id: response.data.item_id,
+        request_id: response.data.request_id
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.error_message || PLAID_ERRORS.CONNECTION_ERROR
+      };
+    }
   }
 
   /**
@@ -117,12 +166,37 @@ export class PlaidClient {
       };
     }
 
-    return { success: false, error: PLAID_ERRORS.CONNECTION_ERROR };
+    try {
+      const response = await this.client.accountsGet({ access_token: accessToken });
+      const accounts = response.data.accounts.map((acc) => ({
+        account_id: acc.account_id,
+        name: acc.name,
+        type: acc.type,
+        subtype: acc.subtype,
+        balances: {
+          available: acc.balances.available,
+          current: acc.balances.current,
+          currency: acc.balances.iso_currency_code
+        },
+        mask: acc.mask
+      }));
+
+      return {
+        success: true,
+        accounts,
+        item_id: response.data.item.item_id,
+        request_id: response.data.request_id
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.error_message || PLAID_ERRORS.CONNECTION_ERROR
+      };
+    }
   }
 
   /**
-   * Ruft Transaktionen ab
-   * Unterstützt Cursor-basierte Pagination
+   * Ruft Transaktionen ab (mit Cursor-basierter Pagination)
    */
   async getTransactions(accessToken, startDate, endDate, options = {}) {
     if (this.isMock) {
@@ -136,7 +210,47 @@ export class PlaidClient {
       };
     }
 
-    return { success: false, error: PLAID_ERRORS.CONNECTION_ERROR };
+    try {
+      const response = await this.client.transactionsGet({
+        access_token: accessToken,
+        start_date: startDate,
+        end_date: endDate,
+        options: {
+          count: options.count || 500,
+          offset: options.offset || 0
+        }
+      });
+
+      const transactions = response.data.transactions.map((tx) => ({
+        transaction_id: tx.transaction_id,
+        account_id: tx.account_id,
+        amount: tx.amount,
+        iso_currency_code: tx.iso_currency_code,
+        date: tx.date,
+        datetime: tx.datetime || tx.date,
+        name: tx.name,
+        merchant_name: tx.merchant_name,
+        category: tx.category,
+        category_id: tx.category_id,
+        pending: tx.pending,
+        transaction_type: tx.transaction_type,
+        payment_channel: tx.payment_channel,
+        source: 'plaid',
+        type: tx.category?.[1] || 'other'
+      }));
+
+      return {
+        success: true,
+        transactions,
+        total_transactions: response.data.total_transactions,
+        has_more: transactions.length < response.data.total_transactions
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.error_message || PLAID_ERRORS.CONNECTION_ERROR
+      };
+    }
   }
 
   /**
@@ -149,7 +263,7 @@ export class PlaidClient {
         mock: true,
         item: {
           item_id: 'item-mock-001',
-          institution_id: 'ins_109508', // ING Plaid ID
+          institution_id: 'ins_109508',
           available_products: PLAID_PRODUCTS,
           billed_products: ['transactions'],
           webhook: null,
@@ -158,7 +272,26 @@ export class PlaidClient {
       };
     }
 
-    return { success: false, error: PLAID_ERRORS.CONNECTION_ERROR };
+    try {
+      const response = await this.client.itemGet({ access_token: accessToken });
+      return {
+        success: true,
+        item: {
+          item_id: response.data.item.item_id,
+          institution_id: response.data.item.institution_id,
+          available_products: response.data.item.available_products,
+          billed_products: response.data.item.billed_products,
+          webhook: response.data.item.webhook,
+          error: response.data.item.error
+        },
+        request_id: response.data.request_id
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.error_message || PLAID_ERRORS.CONNECTION_ERROR
+      };
+    }
   }
 
   /**
@@ -173,7 +306,53 @@ export class PlaidClient {
       };
     }
 
-    return { success: false, error: PLAID_ERRORS.CONNECTION_ERROR };
+    try {
+      await this.client.itemRemove({ access_token: accessToken });
+      return {
+        success: true,
+        removed: true
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.error_message || PLAID_ERRORS.CONNECTION_ERROR
+      };
+    }
+  }
+
+  /**
+   * Ruft Institution/Bank-Infos ab
+   */
+  async getInstitutionById(institutionId) {
+    if (this.isMock) {
+      return {
+        success: true,
+        mock: true,
+        institution: {
+          institution_id: institutionId,
+          name: 'Mock Bank',
+          country_codes: ['DE'],
+          products: PLAID_PRODUCTS
+        }
+      };
+    }
+
+    try {
+      const response = await this.client.institutionsGetById({
+        institution_id: institutionId,
+        country_codes: this.countryCodes
+      });
+      return {
+        success: true,
+        institution: response.data.institution,
+        request_id: response.data.request_id
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.error_message || PLAID_ERRORS.CONNECTION_ERROR
+      };
+    }
   }
 
   /**
@@ -303,4 +482,21 @@ export function validatePlaidConfig(config) {
     errors,
     isMock: !config.clientId || !config.secret
   };
+}
+
+/**
+ * Factory: Erstellt einen Plaid-Client aus Umgebungsvariablen
+ */
+export function createPlaidClientFromEnv() {
+  return new PlaidClient({
+    clientId: process.env.PLAID_CLIENT_ID,
+    secret: process.env.PLAID_SECRET,
+    env: process.env.PLAID_ENV || PLAID_ENV.sandbox,
+    products: process.env.PLAID_PRODUCTS
+      ? process.env.PLAID_PRODUCTS.split(',')
+      : PLAID_PRODUCTS,
+    countryCodes: process.env.PLAID_COUNTRY_CODES
+      ? process.env.PLAID_COUNTRY_CODES.split(',')
+      : PLAID_COUNTRY_CODES
+  });
 }

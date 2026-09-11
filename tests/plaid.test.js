@@ -4,6 +4,7 @@ import {
   createPlaidConfig,
   normalizePlaidTransactions,
   validatePlaidConfig,
+  createPlaidClientFromEnv,
   PLAID_ENV,
   PLAID_PRODUCTS,
   PLAID_COUNTRY_CODES,
@@ -271,3 +272,59 @@ describe('Plaid - Bank Info', () => {
     expect(PLAID_ERRORS.CONNECTION_ERROR).toBeDefined();
   });
 });
+
+describe('Plaid - Factory from Env', () => {
+  const originalEnv = { ...process.env };
+
+  it('creates client from environment variables', () => {
+    process.env.PLAID_CLIENT_ID = 'env-client-id';
+    process.env.PLAID_SECRET = 'env-secret';
+    process.env.PLAID_ENV = 'sandbox';
+
+    const client = createPlaidClientFromEnv();
+    expect(client.isMock).toBe(false);
+    expect(client.clientId).toBe('env-client-id');
+    expect(client.secret).toBe('env-secret');
+
+    // Cleanup
+    delete process.env.PLAID_CLIENT_ID;
+    delete process.env.PLAID_SECRET;
+    delete process.env.PLAID_ENV;
+  });
+
+  it('falls back to mock when env vars missing', () => {
+    delete process.env.PLAID_CLIENT_ID;
+    delete process.env.PLAID_SECRET;
+
+    const client = createPlaidClientFromEnv();
+    expect(client.isMock).toBe(true);
+  });
+});
+
+describe('Plaid - Institution Lookup (Mock)', () => {
+  it('returns mock institution', async () => {
+    const client = new PlaidClient();
+    const result = await client.getInstitutionById('ins_109508');
+    expect(result.success).toBe(true);
+    expect(result.mock).toBe(true);
+    expect(result.institution.name).toBe('Mock Bank');
+  });
+});
+
+describe('Plaid - Live Mode Flag', () => {
+  it('correctly identifies live mode with credentials', () => {
+    const client = new PlaidClient({
+      clientId: 'live-id',
+      secret: 'live-secret',
+      env: PLAID_ENV.production
+    });
+    expect(client.isMock).toBe(false);
+    expect(client.env).toBe(PLAID_ENV.production);
+  });
+
+  it('uses sandbox by default', () => {
+    const client = new PlaidClient({ clientId: 'id', secret: 'secret' });
+    expect(client.env).toBe(PLAID_ENV.sandbox);
+  });
+});
+
