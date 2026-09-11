@@ -4,9 +4,13 @@
   import { parseCSV, detectFormat } from '$lib/csv';
   import { getBudgetProgress, getMonthlyBalance, getMonthlyOverview } from '$lib/dashboard';
   import { getSavingsSummary } from '$lib/savings';
+  import { calculateNetWorth, createAccount } from '$lib/networth';
+  import { calculatePortfolioStats, createInvestment } from '$lib/investments';
   import DashboardCharts from '$lib/components/DashboardCharts.svelte';
   import BudgetProgress from '$lib/components/BudgetProgress.svelte';
   import SavingsGoals from '$lib/components/SavingsGoals.svelte';
+  import InvestmentTracker from '$lib/components/InvestmentTracker.svelte';
+  import NetWorthDashboard from '$lib/components/NetWorthDashboard.svelte';
 
   let transactions = [];
   let budgets = {
@@ -56,7 +60,7 @@
     }
   ];
 
-  // Demo transactions for visualization
+  // Demo transactions
   transactions = [
     { date: '2026-09-01', description: 'Gehalt', amount: 3500, category: 'income', source: 'manual' },
     { date: '2026-09-02', description: 'Miete', amount: -950, category: 'housing', source: 'manual' },
@@ -81,7 +85,6 @@
 
   let showImport = false;
   let importMessage = '';
-  let selectedFile = null;
   let activeTab = 'overview';
 
   const currentDate = new Date();
@@ -93,6 +96,23 @@
   const monthlyBalance = getMonthlyBalance(transactions, currentYear, currentMonth);
   const monthlyOverview = getMonthlyOverview(transactions);
   const savingsSummary = getSavingsSummary(savingsGoals);
+
+  // Accounts for Net Worth
+  let accounts = [
+    createAccount({ name: 'Girokonto ING', type: 'checking', balance: 4250.80, institution: 'ING' }),
+    createAccount({ name: 'Tagesgeld', type: 'savings', balance: 15000, institution: 'ING' }),
+    createAccount({ name: 'Bargeld', type: 'cash', balance: 350 })
+  ];
+
+  // Investments
+  const investments = [
+    createInvestment({ type: 'crypto', symbol: 'BTC', name: 'Bitcoin', amount: 0.5, buyPrice: 55000 }),
+    createInvestment({ type: 'crypto', symbol: 'ETH', name: 'Ethereum', amount: 5, buyPrice: 3200 }),
+    createInvestment({ type: 'stock', symbol: 'AAPL', name: 'Apple Inc.', amount: 10, buyPrice: 175 })
+  ];
+
+  const netWorth = calculateNetWorth(accounts, investments);
+  const portfolioStats = calculatePortfolioStats(investments);
 
   function handleFileUpload(event) {
     const file = event.target.files[0];
@@ -165,6 +185,22 @@
     };
 
     savingsGoals = [...savingsGoals, newGoal];
+  }
+
+  function addAccount() {
+    const name = prompt('Kontoname:');
+    if (!name) return;
+    const balanceStr = prompt('Kontostand (EUR):');
+    if (!balanceStr) return;
+    const type = prompt('Typ (checking/savings/cash/investment):') || 'checking';
+
+    const acc = createAccount({
+      name,
+      type,
+      balance: parseFloat(balanceStr)
+    });
+
+    accounts = [...accounts, acc];
   }
 </script>
 
@@ -243,6 +279,20 @@
       </button>
       <button
         class="flex-shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition-colors
+          {activeTab === 'invest' ? 'bg-indigo-600 text-white' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
+        on:click={() => activeTab = 'invest'}
+      >
+        Invest
+      </button>
+      <button
+        class="flex-shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition-colors
+          {activeTab === 'networth' ? 'bg-indigo-600 text-white' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
+        on:click={() => activeTab = 'networth'}
+      >
+        Vermögen
+      </button>
+      <button
+        class="flex-shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition-colors
           {activeTab === 'transactions' ? 'bg-indigo-600 text-white' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}"
         on:click={() => activeTab = 'transactions'}
       >
@@ -251,25 +301,35 @@
     </div>
 
     <!-- Stats Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
       <div class="bg-gradient-to-br from-green-400 to-green-600 rounded-2xl p-4 sm:p-6 text-white shadow-lg">
-        <p class="text-sm opacity-80">Einnahmen</p>
-        <p class="text-xl sm:text-2xl font-bold mt-1">{formatCurrency(monthlyBalance.income)}</p>
+        <p class="text-xs sm:text-sm opacity-80">Einnahmen</p>
+        <p class="text-lg sm:text-2xl font-bold mt-1">{formatCurrency(monthlyBalance.income)}</p>
       </div>
       <div class="bg-gradient-to-br from-red-400 to-red-600 rounded-2xl p-4 sm:p-6 text-white shadow-lg">
-        <p class="text-sm opacity-80">Ausgaben</p>
-        <p class="text-xl sm:text-2xl font-bold mt-1">{formatCurrency(monthlyBalance.expenses)}</p>
+        <p class="text-xs sm:text-sm opacity-80">Ausgaben</p>
+        <p class="text-lg sm:text-2xl font-bold mt-1">{formatCurrency(monthlyBalance.expenses)}</p>
       </div>
       <div class="bg-gradient-to-br {monthlyBalance.balance >= 0 ? 'from-blue-400 to-blue-600' : 'from-orange-400 to-orange-600'} rounded-2xl p-4 sm:p-6 text-white shadow-lg">
-        <p class="text-sm opacity-80">Saldo</p>
-        <p class="text-xl sm:text-2xl font-bold mt-1">{formatCurrency(monthlyBalance.balance)}</p>
+        <p class="text-xs sm:text-sm opacity-80">Saldo</p>
+        <p class="text-lg sm:text-2xl font-bold mt-1">{formatCurrency(monthlyBalance.balance)}</p>
+      </div>
+      <div class="bg-gradient-to-br from-purple-400 to-indigo-600 rounded-2xl p-4 sm:p-6 text-white shadow-lg">
+        <p class="text-xs sm:text-sm opacity-80">Vermögen</p>
+        <p class="text-lg sm:text-2xl font-bold mt-1">{formatCurrency(netWorth.totalValue)}</p>
       </div>
     </div>
 
     <!-- Desktop Layout: All sections visible -->
     <div class="hidden lg:block space-y-6">
+      <!-- Net Worth Dashboard -->
+      <NetWorthDashboard />
+
       <!-- Charts Row -->
       <DashboardCharts {monthlyOverview} {budgetProgress} {transactions} />
+
+      <!-- Investment Tracker -->
+      <InvestmentTracker />
 
       <!-- Budget & Savings Row -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -320,6 +380,10 @@
     <div class="lg:hidden">
       {#if activeTab === 'overview'}
         <DashboardCharts {monthlyOverview} {budgetProgress} {transactions} />
+      {:else if activeTab === 'networth'}
+        <NetWorthDashboard />
+      {:else if activeTab === 'invest'}
+        <InvestmentTracker />
       {:else if activeTab === 'budget'}
         <BudgetProgress {budgetProgress} {currentMonth} {currentYear} />
       {:else if activeTab === 'savings'}
